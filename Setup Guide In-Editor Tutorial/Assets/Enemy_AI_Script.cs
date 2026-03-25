@@ -1,0 +1,143 @@
+using UnityEngine;
+
+public class Enemy_AI_Script : MonoBehaviour
+{
+    private UnityEngine.AI.NavMeshAgent agent;
+    public Transform[] patrolPoints;
+    public int x = 0;
+    bool playerIsVisible = false;
+    bool playerIsTracked = false;
+    bool patrolling = true;
+    public float detectionTimer = 0f;
+
+
+
+//Change waitTimer to change how long enemy waits before resuming patrolling after losing chase
+    public float waitTimer = 3f;
+    private void Start()
+
+    {
+        agent = GetComponent<UnityEngine.AI.NavMeshAgent>();
+        agent.speed = 12f;
+        agent.acceleration = 50f;
+        agent.angularSpeed = 720f;
+
+
+        // Find the GameObject with tag "Sense" (guaranteed to exist)
+        GameObject sense = GameObject.FindWithTag("Sense");
+
+        // Get the Renderer component from that GameObject
+        Renderer rend = sense.GetComponent<Renderer>();
+    }
+
+    private void Update(){
+
+    GameObject sense = GameObject.FindWithTag("Sense");
+    Renderer rend = sense.GetComponent<Renderer>();
+playerIsTracked = false;
+        if(playerIsTracked){
+        agent.SetDestination(GameObject.FindGameObjectWithTag("Target").transform.position);
+        patrolling = false;
+        }
+
+        else if(patrolling && playerIsTracked == false)
+        {
+        agent.SetDestination(patrolPoints[x].transform.position);
+
+        if(agent.transform.position.x == patrolPoints[x].transform.position.x && 
+           agent.transform.position.z == patrolPoints[x].transform.position.z)
+            {
+                if(x<7){
+                x = x + 1;
+                }
+                else
+                {
+                    x=0;
+                }
+            }
+        
+        }
+
+        playerIsVisible = CanSeePlayer(agent.transform, GameObject.FindGameObjectWithTag("Target").transform);
+        if (playerIsVisible)
+        {
+            playerIsTracked = true;
+            detectionTimer = 5f + waitTimer;
+
+            rend.material.color = Color.red;
+        }
+
+        //Timer always ticks down
+        detectionTimer -= Time.deltaTime;
+
+        if(detectionTimer < (0f + waitTimer) && detectionTimer >0f)
+        {
+            playerIsTracked = false;
+            patrolling = false;
+            agent.SetDestination(agent.transform.position);
+            //Should stand still for 3 seconds after losing chase (setdestionation =  current position)
+            rend.material.color = Color.orange;
+        }
+
+        else if(detectionTimer <= 0f)
+        {
+            patrolling = true;
+            rend.material.color = Color.yellow;
+        }
+
+
+
+
+        //Visualiations for debugging
+
+         
+        
+}
+//End f update function
+
+
+    //Function to detecte whether or not the enemy can see the player
+    public bool CanSeePlayer(Transform enemy, Transform player)
+{
+    float viewDistance = 50f;
+    float viewAngle = 45f;
+
+    Vector3 dirToPlayer = (player.position - enemy.position).normalized;
+
+
+
+
+//Visualiation for debugging purposes
+
+    Vector3 left =
+        Quaternion.Euler(0, -viewAngle, 0) * transform.forward * viewDistance;
+    Vector3 right =
+        Quaternion.Euler(0, viewAngle, 0) * transform.forward * viewDistance;
+
+    Debug.DrawLine(transform.position, transform.position + left, Color.red);
+    Debug.DrawLine(transform.position, transform.position + right, Color.red);
+    Debug.DrawLine(transform.position, transform.position + transform.forward * viewDistance, Color.green);
+
+
+    // Distance check
+    if (Vector3.Distance(enemy.position, player.position) > viewDistance)
+        return false;
+
+    // Angle check
+    float angle = Vector3.Angle(enemy.forward, dirToPlayer);
+    if (angle > viewAngle)
+        return false;
+
+    // Line of sight
+    if (Physics.Raycast(enemy.position + Vector3.up, dirToPlayer, out RaycastHit hit, viewDistance))
+    {
+        if (hit.transform == player)
+            return true;
+    }
+
+    return false;
+}
+
+    
+
+}
