@@ -16,8 +16,10 @@ public class PlayerMovement : MonoBehaviour
     public float crouchHeight = 1f;
     public float crouchSpeed = 3f;
     bool isCrouched = false;
-    float crouchTimer = 1f;
-    float timer = 1f;
+    float crouchTimer = 0.5f;
+    
+    //Not used anymore
+    //float timer = 1f;
     bool isCrouching = false;
     private Vector3 moveDirection = Vector3.zero;
     private float rotationX = 0;

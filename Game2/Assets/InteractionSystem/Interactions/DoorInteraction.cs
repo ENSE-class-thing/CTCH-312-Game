@@ -14,6 +14,8 @@ public class DoorInteraction : MonoBehaviour, IInteractable
 
     private NavMeshObstacle obstacle;
 
+    public bool isOpen => _isOpen;
+
     private void Start()
     {
         obstacle = GetComponent<NavMeshObstacle>();
@@ -27,6 +29,10 @@ public class DoorInteraction : MonoBehaviour, IInteractable
 
     public bool CanInteract()
     {
+        if(_isOpen){
+            UIManager.Instance?.ShowMessage("It won't budge");
+            return false;
+        }
         if (timer <= 0)
         {
             if (key != null && key.IsPickedUp)
