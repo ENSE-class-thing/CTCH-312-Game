@@ -1,0 +1,321 @@
+using UnityEngine;
+using UnityEngine.AI;
+using System;
+
+public class Enemy_AI_Script : MonoBehaviour
+{
+    [SerializeField] private NavMeshAgent agent;
+
+    [Header("Patrol")]
+    public Transform[] patrolPoints;
+    private int currentPatrolIndex = 0;
+
+    [Header("Detection")]
+    public float viewDistance = 50f;
+    public float viewAngle = 45f;
+    public float detectionTimer = 0f;
+    public float waitTimer = 3f;
+
+    [Header("Vision")]
+    public LayerMask visionIgnoreLayer;
+
+    [Header("AI Behavior")]
+    public float repathInterval = 0.5f;
+    public float doorEvaluationInterval = 1.5f;
+
+    private float repathTimer = 0f;
+    private float doorEvalTimer = 0f;
+
+    private bool playerIsVisible = false;
+    private bool playerIsTracked = false;
+    private bool patrolling = true;
+
+    private Transform player;
+    private Renderer senseRenderer;
+    private DoorInteractionHinge[] allDoors;
+
+    private DoorInteractionHinge targetDoor = null;
+
+    [Header("Sound Detection")]
+    public float soundInvestigationTime = 10f;
+    private bool investigatingSound = false;
+    private Vector3 soundTarget;
+    private float soundTimer = 0f;
+
+    [SerializeField] private float debugSpeed;
+
+
+    private void OnEnable()
+    {
+        // Subscribe to the dropSound event
+        KeyInteraction.OnDropSound += GoToSound;
+        PaperInteraction.OnDropSound += GoToSound;
+        BookInteraction.OnDropSound += GoToSound;
+        PadlockScript.OnDropSound += GoToSound;
+    }
+
+    private void OnDisable()
+    {
+        // Unsubscribe to avoid memory leaks
+        KeyInteraction.OnDropSound -= GoToSound;
+        PaperInteraction.OnDropSound -= GoToSound;
+        BookInteraction.OnDropSound -= GoToSound;
+        PadlockScript.OnDropSound -= GoToSound;
+    }
+
+    void Start()
+    {
+        agent = GetComponent<NavMeshAgent>();
+        agent.speed = 7f;
+        agent.acceleration = 50f;
+        agent.angularSpeed = 720f;
+
+        player = GameObject.FindGameObjectWithTag("Target").transform;
+
+        GameObject sense = GameObject.FindWithTag("Sense");
+        if (sense != null)
+            senseRenderer = sense.GetComponent<Renderer>();
+
+        allDoors = FindObjectsOfType<DoorInteractionHinge>();
+    }
+
+    void Update()
+    {
+        HandleVision();
+        HandleState();
+        HandleMovement();
+        TryOpenDoorAhead();
+        debugSpeed = agent.speed;
+    }
+
+    // =========================
+    // 👁️ VISION SYSTEM
+    // =========================
+    void HandleVision()
+    {
+        playerIsVisible = CanSeePlayer(transform, player);
+
+        if (playerIsVisible)
+        {
+            playerIsTracked = true;
+            agent.speed = 10f;
+            detectionTimer = 5f + waitTimer;
+            if (senseRenderer != null) senseRenderer.material.color = Color.red;
+        }
+
+        detectionTimer -= Time.deltaTime;
+
+        if (detectionTimer < waitTimer && detectionTimer > 0f)
+        {
+            playerIsTracked = false;
+            patrolling = false;
+            agent.speed = 7f;
+            agent.SetDestination(transform.position);
+            if (senseRenderer != null) senseRenderer.material.color = Color.orange;
+        }
+        else if (detectionTimer <= 0f)
+        {
+            patrolling = true;
+            agent.speed = 7f;
+            if (senseRenderer != null) senseRenderer.material.color = Color.yellow;
+        }
+    }
+
+    // =========================
+    // 🧠 STATE LOGIC
+    // =========================
+void HandleState()
+{
+    // -------------------------
+    // 1️⃣ Player has highest priority
+    // -------------------------
+    if (playerIsTracked)
+    {
+        investigatingSound = false; // Stop investigating any sounds
+        patrolling = false;
+
+        repathTimer -= Time.deltaTime;
+        doorEvalTimer -= Time.deltaTime;
+
+        if (repathTimer <= 0f)
+        {
+            if (targetDoor != null)
+                agent.SetDestination(targetDoor.transform.position);
+            else
+                agent.SetDestination(player.position);
+
+            repathTimer = repathInterval;
+        }
+
+        if (doorEvalTimer <= 0f)
+        {
+            EvaluateDoorVsPath();
+            doorEvalTimer = doorEvaluationInterval;
+        }
+        //Assign 12f as the speed while chasing the player
+        agent.speed = 12f;
+        return; // Skip everything else while chasing player
+    }
+
+    // -------------------------
+    // 2️⃣ Investigate sounds if not chasing player
+    // -------------------------
+    if (investigatingSound)
+    {
+        soundTimer -= Time.deltaTime;
+        agent.SetDestination(soundTarget);
+
+        if (soundTimer <= 0f || agent.remainingDistance < 1f)
+        {
+            investigatingSound = false;
+            patrolling = true;
+        }
+        agent.speed = 12f;
+        return; // Skip patrolling while investigating
+    }
+
+    // -------------------------
+    // 3️⃣ Patrolling
+    // -------------------------
+    patrolling = true;
+}
+
+    // =========================
+    // 🚶 MOVEMENT
+    // =========================
+    void HandleMovement()
+    {
+        if (patrolling && !playerIsTracked && !investigatingSound)
+        {
+            agent.speed = 7f;
+            agent.SetDestination(patrolPoints[currentPatrolIndex].position);
+
+            if (!agent.pathPending && agent.remainingDistance < 0.5f)
+            {
+                currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
+            }
+        }
+
+        // Path blocked → try door interaction
+        if (agent.pathStatus == NavMeshPathStatus.PathPartial)
+        {
+            TryOpenDoorAhead();
+        }
+    }
+
+    // =========================
+    // 🚪 DOOR INTERACTION
+    // =========================
+    void TryOpenDoorAhead()
+    {
+        RaycastHit hit;
+        if (Physics.Raycast(transform.position + Vector3.up * 1.5f, transform.forward, out hit, 2f))
+        {
+            DoorInteractionHinge door = hit.collider.GetComponentInParent<DoorInteractionHinge>();
+
+            if (door != null && door.CanInteract())
+            {
+                door.Interact(null);
+
+                if (targetDoor == door)
+                    targetDoor = null;
+
+                agent.SetDestination(player.position);
+            }
+        }
+    }
+
+    void EvaluateDoorVsPath()
+    {
+        float normalPath = GetPathLength(player.position);
+        float pathWithDoorsOpen = GetPathLength(player.position); // Simplified for now
+
+        if (pathWithDoorsOpen + 1f < normalPath)
+        {
+            DoorInteractionHinge closestDoor = null;
+            float closestDist = Mathf.Infinity;
+
+            foreach (var door in allDoors)
+            {
+                if (!door.IsOpen())
+                {
+                    float dist = Vector3.Distance(transform.position, door.transform.position);
+                    if (dist < closestDist)
+                    {
+                        closestDist = dist;
+                        closestDoor = door;
+                    }
+                }
+            }
+
+            if (closestDoor != null)
+            {
+                targetDoor = closestDoor;
+                agent.SetDestination(targetDoor.transform.position);
+                return;
+            }
+        }
+
+        targetDoor = null;
+        agent.SetDestination(player.position);
+    }
+
+    float GetPathLength(Vector3 target)
+    {
+        NavMeshPath path = new NavMeshPath();
+        agent.CalculatePath(target, path);
+
+        if (path.corners.Length < 2)
+            return Mathf.Infinity;
+
+        float length = 0f;
+        for (int i = 1; i < path.corners.Length; i++)
+        {
+            length += Vector3.Distance(path.corners[i - 1], path.corners[i]);
+        }
+
+        return length;
+    }
+
+    // =========================
+    // 🔊 SOUND INVESTIGATION
+    // =========================
+public void GoToSound(Vector3 soundPosition)
+{
+    // Only investigate sounds if NOT chasing the player
+    if (playerIsTracked) return;
+
+    investigatingSound = true;
+    soundTarget = soundPosition;
+    soundTimer = soundInvestigationTime;
+    agent.speed = 12f;
+    agent.SetDestination(soundTarget);
+}
+
+    // =========================
+    // 👁️ LINE OF SIGHT
+    // =========================
+    public bool CanSeePlayer(Transform enemy, Transform player)
+    {
+        Vector3 dirToPlayer = (player.position - enemy.position).normalized;
+
+        if (Vector3.Distance(enemy.position, player.position) > viewDistance)
+            return false;
+
+        float angle = Vector3.Angle(enemy.forward, dirToPlayer);
+        if (angle > viewAngle)
+            return false;
+
+        Vector3 origin = enemy.position + Vector3.up * 1.5f;
+
+        int mask = ~(1 << LayerMask.NameToLayer("VisionIgnore"));
+
+        if (Physics.Raycast(origin, dirToPlayer, out RaycastHit hit, viewDistance, mask))
+        {
+            if (hit.transform.CompareTag("Target"))
+                return true;
+        }
+
+        return false;
+    }
+}
