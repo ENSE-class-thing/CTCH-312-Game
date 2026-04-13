@@ -4,6 +4,8 @@ Members:
 
 Isaac
 
+Chimeremeze
+
 Oladimeji
 
 Nick
